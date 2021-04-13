@@ -419,6 +419,7 @@ class Controller(object):
         self._view.FormClosing += self.On_MainForm_Closing
         self._view._run_button.Click += self.run_button_Click
         self._view._browse_button.Click += self.browse_button_Click
+        self._view._write_exl_button.Click += self.write_exl_button_Click
         self._model.startProgress += self.startProgressBar
         self._model.ReportProgress += self.updateProgressBar
         self._model.endProgress += self.disableProgressBar
@@ -547,7 +548,16 @@ class Controller(object):
         self._model.excel_parameters = self.excel_parameters
         self._model.main()
 
+    def write_exl_button_Click(self, sender, args):
+        self.excel_parameters = sorted(list(self._view._shar_pars_checkedListBox.CheckedItems) + \
+                                list(self._view._builtin_pars_checkedListBox.CheckedItems))
+        self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
+        
+        self._model.excel_parameters = self.excel_parameters
+        self._model.write_to_excel()
+
     def startProgressBar(self, *args):
+        self._view._progressBar.Value = 0
         self._view._progressBar.Maximum = args[0]
 
     def updateProgressBar(self, *args):
@@ -589,12 +599,14 @@ class Model(object):
         self.New_MEPSpaces = {}
         self.Exist_MEPSpaces = {}
         self._worker = BackgroundWorker()
-        self.counter = 0
         self.startProgress = Event()
         self.ReportProgress = Event()
         self.endProgress = Event()
         self._worker.DoWork += lambda _, __: self.__main()
         self._worker.RunWorkerCompleted += lambda _, __: self.endProgress.emit()
+        # Create a space collector instance
+        self.space_collector = FilteredElementCollector(
+            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
         # endregion
 
     # region Getters and Setters
@@ -644,10 +656,8 @@ class Model(object):
             if room_collector and room_collector.GetElementCount() != 0:
                 self.rooms_list = room_collector.WhereElementIsNotElementType(
                 ).OfCategory(BuiltInCategory.OST_Rooms)
-            # Create a space collector instance
-            self.space_collector = FilteredElementCollector(
-                self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
 
+            self.counter = 0
             self.startProgress.emit(room_collector.GetElementCount() + self.space_collector.GetElementCount() + \
                 (2*(room_collector.GetElementCount()*len(self._excel_parameters))))
             self.__main()
@@ -671,7 +681,7 @@ class Model(object):
             tResult = mainDialog.Show()
             if tResult == TaskDialogResult.Yes:
                 # Write data to an excel file
-                self.write_to_excel(self._excel_parameters)
+                self.__write_to_excel(self._excel_parameters)
 
         #except Exception as e:
         #    msg = traceback.format_exc(str(e))
@@ -889,11 +899,12 @@ class Model(object):
         d_merged.update(d2)
         return d_merged
     
-    def get_exsist_spaces(self):
+    def __get_exsist_spaces(self):
         """
         Obtaining existing spaces
         Returns a dictionary: key: reference_room_id, value: MEP space
         """
+        self.Exist_MEPSpaces = {}
         # Collect all existing MEP spaces in this document
         for space in self.space_collector:
 
@@ -905,9 +916,25 @@ class Model(object):
             self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
                     ref_id_par_val, space)
 
-    def write_to_excel(self, params_to_write):
+            self.counter += 1
+            self.ReportProgress.emit(self.counter)
+
+    def write_to_excel(self):
         """
         Writing parameters to an Excel workbook
+        """
+        self.counter = 0
+        self.startProgress.emit(self.space_collector.GetElementCount() + \
+                ((self.space_collector.GetElementCount()*len(self._excel_parameters))))
+        # Obtaining existing spaces
+        self.__get_exsist_spaces()
+        # Write data to an excel file
+        self.__write_to_excel(self._excel_parameters)
+
+    def __write_to_excel(self, params_to_write):
+        """
+        Writing parameters to an Excel workbook
+        (private method)
         """
         units = {UnitType.UT_Length: DisplayUnitType.DUT_METERS,
                 UnitType.UT_Area: DisplayUnitType.DUT_SQUARE_METERS,
@@ -933,6 +960,7 @@ class Model(object):
         row = 2
 
         MEPSpaces = self.merge_two_dicts(self.New_MEPSpaces, self.Exist_MEPSpaces)
+
         for space_id, space in MEPSpaces.items():
             try:
                 workSheet.Cells[row, "A"] = space_id
@@ -950,8 +978,11 @@ class Model(object):
                         self.ReportProgress.emit(self.counter)
                 row += 1
                     
-            except Exception:
-                pass
+            except Exception as e:
+                msg = traceback.format_exc(str(e))
+                WinForms.MessageBox.Show(msg, "Error!",
+                WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+                return
         # makes the Excel application visible to the user
         self.excel.Visible = True
 
