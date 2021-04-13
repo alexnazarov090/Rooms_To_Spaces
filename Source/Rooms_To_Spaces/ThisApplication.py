@@ -29,6 +29,7 @@ import string
 import re
 from itertools import izip, product
 import traceback
+import inspect
 
 
 
@@ -772,8 +773,8 @@ class Model(object):
         # Collect all existing MEP spaces in this document
         for space in self.space_collector:
             # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
-            ID_par_list = space.GetParameters(self._search_id)
-            ref_id_par_val = ID_par_list[0].AsString()
+            id_par_list = space.GetParameters(self._search_id)
+            ref_id_par_val = id_par_list[0].AsString()
             # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
             # If it's not the case delete the corresponding space
             if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
@@ -888,6 +889,22 @@ class Model(object):
         d_merged.update(d2)
         return d_merged
     
+    def get_exsist_spaces(self):
+        """
+        Obtaining existing spaces
+        Returns a dictionary: key: reference_room_id, value: MEP space
+        """
+        # Collect all existing MEP spaces in this document
+        for space in self.space_collector:
+
+            # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
+            id_par_list = space.GetParameters(self._search_id)
+            ref_id_par_val = id_par_list[0].AsString()
+
+            # Cast space into Existing MEP spaces dictionary
+            self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
+                    ref_id_par_val, space)
+
     def write_to_excel(self, params_to_write):
         """
         Writing parameters to an Excel workbook
@@ -914,10 +931,11 @@ class Model(object):
         for par, col in params.items():
             workSheet.Cells[1, col] = par
         row = 2
+
         MEPSpaces = self.merge_two_dicts(self.New_MEPSpaces, self.Exist_MEPSpaces)
-        for id, space in MEPSpaces.items():
+        for space_id, space in MEPSpaces.items():
             try:
-                workSheet.Cells[row, "A"] = id
+                workSheet.Cells[row, "A"] = space_id
                 for par in space.Parameters:
                     par_name = par.Definition.Name
                     if par_name in params.keys():
