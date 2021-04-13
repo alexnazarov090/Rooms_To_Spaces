@@ -1,0 +1,18 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+# SharpDevelop 4.2.0.8783
+Project("{FD48973F-F585-4F70-812B-4D0503B36CE9}") = "Rooms_To_Spaces", "Rooms_To_Spaces\Rooms_To_Spaces.pyproj", "{28661F0C-5E83-4B7E-BD7E-D5BE1005A161}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{28661F0C-5E83-4B7E-BD7E-D5BE1005A161}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{28661F0C-5E83-4B7E-BD7E-D5BE1005A161}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28661F0C-5E83-4B7E-BD7E-D5BE1005A161}.Release|Any CPU.Build.0 = Release|Any CPU
+		{28661F0C-5E83-4B7E-BD7E-D5BE1005A161}.Release|Any CPU.ActiveCfg = Release|Any CPU
+	EndGlobalSection
+EndGlobal

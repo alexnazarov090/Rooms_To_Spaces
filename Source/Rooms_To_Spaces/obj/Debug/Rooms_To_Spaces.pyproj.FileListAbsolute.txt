@@ -1,0 +1,3 @@
+C:\ProgramData\Autodesk\Revit\Macros\2019\Revit\AppHookup\Rooms_To_Spaces\Addin\Rooms_To_Spaces.dll
+C:\ProgramData\Autodesk\Revit\Macros\2019\Revit\AppHookup\Rooms_To_Spaces\Source\Rooms_To_Spaces\obj\Debug\Rooms_To_Spaces.pyprojResolveAssemblyReference.cache
+C:\ProgramData\Autodesk\Revit\Macros\2019\Revit\AppHookup\Rooms_To_Spaces\Source\Rooms_To_Spaces\obj\Debug\Rooms_To_Spaces.dll
