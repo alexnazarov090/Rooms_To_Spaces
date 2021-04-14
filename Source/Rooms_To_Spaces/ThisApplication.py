@@ -420,6 +420,7 @@ class Controller(object):
         self._view._run_button.Click += self.run_button_Click
         self._view._browse_button.Click += self.browse_button_Click
         self._view._write_exl_button.Click += self.write_exl_button_Click
+        self._view._file_path_textBox.TextChanged += self.file_path_textBox_TextChanged
         self._model.startProgress += self.startProgressBar
         self._model.ReportProgress += self.updateProgressBar
         self._model.endProgress += self.disableProgressBar
@@ -428,6 +429,7 @@ class Controller(object):
         self._view._builtin_pars_check_all_btn.Click += self.builtin_pars_check_all_btn_Click
         self._view._builtin_pars_check_none_btn.Click += self.builtin_pars_check_none_btn_Click
         self._view._space_id_comboBox.SelectedValueChanged += self.space_id_comboBox_SelectedValueChanged
+        self._view._write_exl_checkBox.CheckedChanged += self.write_exl_checkBox_CheckChng
 
     def On_MainForm_StartUp(self, sender, args):
         self.load_project_parameters((self._view._space_id_comboBox, self._view._shar_pars_checkedListBox)) 
@@ -523,13 +525,24 @@ class Controller(object):
             control.Items.Add(par_name)
             control.EndUpdate()
 
+    def file_path_textBox_TextChanged(self, sender, args):
+        if sender.Text != "":
+            self._view._write_exl_button.Enabled = True
+            self._view._write_exl_checkBox.Enabled = True
+
     def space_id_comboBox_SelectedValueChanged(self, sender, args):
         if self._view._space_id_comboBox.SelectedIndex != 0:
             self._model.search_id = self._view._space_id_comboBox.SelectedItem
 
+    def write_exl_checkBox_CheckChng(self, sender, args):
+        if sender.CheckState == WinForms.CheckState.Checked:
+            self._model.xl_write_flag = True
+        else:
+            self._model.xl_write_flag = False
+
     def browse_button_Click(self, sender, args):
 
-        self._open_file_Dialog.InitialDirectory = os.path.realpath(__file__)
+        self._open_file_Dialog.InitialDirectory = os.path.realpath(self.doc.PathName)
         self._open_file_Dialog.Filter = "CSV files (*.csv)|*.csv|Excel Files|*.xls;*.xlsx"
         self._open_file_Dialog.FilterIndex = 2
         self._open_file_Dialog.RestoreDirectory = True
@@ -582,7 +595,7 @@ class Controller(object):
 
 
 class Model(object):
-    def __init__(self, __revit__, search_id=None, excel_parameters=None, xl_file_path=None):
+    def __init__(self, __revit__, search_id=None, excel_parameters=None, xl_file_path=None, xl_write_flag=False):
         # region Get Document and Application
         self.doc = __revit__.ActiveUIDocument.Document
         self.uidoc = UIDocument(self.doc)
@@ -596,17 +609,23 @@ class Model(object):
         self._search_id = search_id
         self._excel_parameters = excel_parameters
         self._xl_file_path = xl_file_path
+        self._xl_write_flag = xl_write_flag
         self.New_MEPSpaces = {}
         self.Exist_MEPSpaces = {}
-        self._worker = BackgroundWorker()
-        self.startProgress = Event()
-        self.ReportProgress = Event()
-        self.endProgress = Event()
-        self._worker.DoWork += lambda _, __: self.__main()
-        self._worker.RunWorkerCompleted += lambda _, __: self.endProgress.emit()
+
         # Create a space collector instance
         self.space_collector = FilteredElementCollector(
             self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
+        # endregion
+
+        # region BackgroundWorker and Custom Events
+        self.startProgress = Event()
+        self.ReportProgress = Event()
+        self.endProgress = Event()
+        self._worker = BackgroundWorker()
+        self._worker.DoWork += lambda _, __: self.__async_write_xl()
+        self._worker.RunWorkerCompleted += lambda _, __: self.endProgress.emit()
+        self._worker.WorkerSupportsCancellation = True
         # endregion
 
     # region Getters and Setters
@@ -627,6 +646,14 @@ class Model(object):
         self._xl_file_path = value
     
     @property
+    def xl_write_flag(self):
+        return self._xl_write_flag
+
+    @xl_write_flag.setter
+    def xl_write_flag(self, value):
+        self._xl_write_flag = value
+    
+    @property
     def excel_parameters(self):
         return self._excel_parameters
 
@@ -642,16 +669,21 @@ class Model(object):
         # Prompt the user to pick the required external link
         try:
             ref = sel.PickObject(ObjectType.Element, "Please pick a linked model instance")
+
             # Get AR RVT link
             rvt_link = self.doc.GetElement(ref.ElementId)
             linkedDoc = rvt_link.GetLinkDocument()
+
             # Create a room collector instance
             room_collector = FilteredElementCollector(linkedDoc)
+
             # Collect levels from the current document
             levels = FilteredElementCollector(self.doc).WhereElementIsNotElementType(
             ).OfCategory(BuiltInCategory.OST_Levels)
+
             # For each level in the current model define its elevation and create level elevation:Level dictionary
             self.lvls_dict = {level.Elevation: level for level in levels}
+            
             # Collect rooms from RVT link
             if room_collector and room_collector.GetElementCount() != 0:
                 self.rooms_list = room_collector.WhereElementIsNotElementType(
@@ -672,15 +704,9 @@ class Model(object):
         try:
             # Create spaces by rooms
             self.create_spaces_by_rooms(self.rooms_list)
-
-            # Create a Revit task dialog to communicate information to the user
-            mainDialog = TaskDialog("Write parameters to Excel")
-            mainDialog.MainInstruction = "Write parameters to Excel"
-            mainDialog.MainContent = "Do you want to write parameters to an Excell spreadsheet?"
-            mainDialog.CommonButtons = TaskDialogCommonButtons.Yes|TaskDialogCommonButtons.No
-            tResult = mainDialog.Show()
-            if tResult == TaskDialogResult.Yes:
-                # Write data to an excel file
+            
+            # Write data to an excel file
+            if self._xl_write_flag:
                 self.__write_to_excel(self._excel_parameters)
 
         #except Exception as e:
@@ -689,8 +715,9 @@ class Model(object):
         #    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
         #    return
 
-        except Exception:
-            WinForms.MessageBox.Show("The operation was cancelled!", "Error!",
+        except Exception as e:
+            msg = traceback.format_exc(str(e))
+            WinForms.MessageBox.Show(msg, "Error!",
             WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
             return
         
@@ -828,7 +855,8 @@ class Model(object):
                 self.counter += 1
                 self.ReportProgress.emit(self.counter)
 
-            elif par.Definition.BuiltInParameter != BuiltInParameter.INVALID:
+            elif par.Definition.BuiltInParameter != BuiltInParameter.INVALID\
+                and LabelUtils.GetLabelFor(par.Definition.BuiltInParameter) in self._excel_parameters:
                 # If room parameter is builtin get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by builtin parameter
                 # Depending on the room parameter storage type set its value to the space parameter
                 try:
@@ -899,37 +927,50 @@ class Model(object):
         d_merged.update(d2)
         return d_merged
     
-    def __get_exsist_spaces(self):
+    def __get_exist_spaces(self):
         """
-        Obtaining existing spaces
-        Returns a dictionary: key: reference_room_id, value: MEP space
+        Obtains existing spaces
+        Fills the Exist_MEPSpaces dictionary: key: reference_room_id, value: MEP space
         """
         self.Exist_MEPSpaces = {}
         # Collect all existing MEP spaces in this document
         for space in self.space_collector:
 
-            # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
-            id_par_list = space.GetParameters(self._search_id)
-            ref_id_par_val = id_par_list[0].AsString()
+            try:
+                # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
+                id_par_list = space.GetParameters(self._search_id)
+                ref_id_par_val = id_par_list[0].AsString()
 
-            # Cast space into Existing MEP spaces dictionary
-            self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
-                    ref_id_par_val, space)
+                # Cast space into Existing MEP spaces dictionary
+                self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
+                        ref_id_par_val, space)
 
-            self.counter += 1
-            self.ReportProgress.emit(self.counter)
+                self.counter += 1
+                self.ReportProgress.emit(self.counter)
+
+            except Exception:
+                pass
+
+    def __async_write_xl(self):
+        """
+        Acyncronously writes space parameters to an Excel workbook
+        """
+        # Obtaining existing spaces
+        self.__get_exsist_spaces()
+        # Write data to an excel file
+        self.__write_to_excel(self._excel_parameters)
 
     def write_to_excel(self):
         """
         Writing parameters to an Excel workbook
         """
-        self.counter = 0
-        self.startProgress.emit(self.space_collector.GetElementCount() + \
-                ((self.space_collector.GetElementCount()*len(self._excel_parameters))))
-        # Obtaining existing spaces
-        self.__get_exsist_spaces()
-        # Write data to an excel file
-        self.__write_to_excel(self._excel_parameters)
+        if not self._worker.IsBusy:
+            self.counter = 0
+            self.startProgress.emit(self.space_collector.GetElementCount() + \
+                    ((self.space_collector.GetElementCount()*len(self._excel_parameters))))
+            
+            self._worker.RunWorkerAsync()
+            
 
     def __write_to_excel(self, params_to_write):
         """
@@ -979,10 +1020,8 @@ class Model(object):
                 row += 1
                     
             except Exception as e:
-                msg = traceback.format_exc(str(e))
-                WinForms.MessageBox.Show(msg, "Error!",
-                WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
-                return
+                pass
+
         # makes the Excel application visible to the user
         self.excel.Visible = True
 
