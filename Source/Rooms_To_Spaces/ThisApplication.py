@@ -411,19 +411,24 @@ class Controller(object):
         self._model = model
         self.excel_parameters = []
         self._open_file_Dialog = WinForms.OpenFileDialog()
+        self._worker = BackgroundWorker()
 
         self._connectSignals()
 
     def _connectSignals(self):
+        
+        self._model.startProgress += self.startProgressBar
+        self._model.ReportProgress += self.updateProgressBar
+        self._model.endProgress += self.disableProgressBar
+        self._worker.DoWork += lambda _, __: self._model.write_to_excel()
+        self._worker.RunWorkerCompleted += self.run_worker_completed
+        self._worker.WorkerSupportsCancellation = True
         self._view.Shown += self.On_MainForm_StartUp
         self._view.FormClosing += self.On_MainForm_Closing
         self._view._run_button.Click += self.run_button_Click
         self._view._browse_button.Click += self.browse_button_Click
         self._view._write_exl_button.Click += self.write_exl_button_Click
         self._view._file_path_textBox.TextChanged += self.file_path_textBox_TextChanged
-        self._model.startProgress += self.startProgressBar
-        self._model.ReportProgress += self.updateProgressBar
-        self._model.endProgress += self.disableProgressBar
         self._view._shar_pars_check_all_btn.Click += self.shar_pars_check_all_btn_Click
         self._view._shar_pars_check_none_btn.Click += self.shar_pars_check_none_btn_Click
         self._view._builtin_pars_check_all_btn.Click += self.builtin_pars_check_all_btn_Click
@@ -444,6 +449,9 @@ class Controller(object):
         if result == WinForms.DialogResult.No:
             # cancel the closure of the form.
             args.Cancel = True
+        
+        else:
+            self._worker.CancelAsync()
 
     def get_parameter_bindings(self):
         prj_defs_dict = {}
@@ -567,7 +575,9 @@ class Controller(object):
         self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
         
         self._model.excel_parameters = self.excel_parameters
-        self._model.write_to_excel()
+
+        if not self._worker.IsBusy:
+            self._worker.RunWorkerAsync()
 
     def startProgressBar(self, *args):
         self._view._progressBar.Value = 0
@@ -581,6 +591,19 @@ class Controller(object):
             self._view._progressBar.Value = self._view._progressBar.Maximum
             WinForms.MessageBox.Show("Task completed successfully!", "Success!", 
             WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+
+    def run_worker_completed(self, sender, args):
+        
+        if args.Cancelled:
+            WinForms.MessageBox.Show("Task canceled!", "Canceled!", 
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+
+        elif args.Error:
+            WinForms.MessageBox.Show("Error in writing parameters!", "Error!", 
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+        
+        else:
+            self.disableProgressBar()
 
     def dispose(self):
         self._view.components.Dispose()
@@ -618,14 +641,10 @@ class Model(object):
             self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
         # endregion
 
-        # region BackgroundWorker and Custom Events
+        # region Custom Events
         self.startProgress = Event()
         self.ReportProgress = Event()
         self.endProgress = Event()
-        self._worker = BackgroundWorker()
-        self._worker.DoWork += lambda _, __: self.__async_write_xl()
-        self._worker.RunWorkerCompleted += lambda _, __: self.endProgress.emit()
-        self._worker.WorkerSupportsCancellation = True
         # endregion
 
     # region Getters and Setters
@@ -950,28 +969,20 @@ class Model(object):
 
             except Exception:
                 pass
-
-    def __async_write_xl(self):
-        """
-        Acyncronously writes space parameters to an Excel workbook
-        """
-        # Obtaining existing spaces
-        self.__get_exsist_spaces()
-        # Write data to an excel file
-        self.__write_to_excel(self._excel_parameters)
-
+        
     def write_to_excel(self):
         """
         Writing parameters to an Excel workbook
         """
-        if not self._worker.IsBusy:
-            self.counter = 0
-            self.startProgress.emit(self.space_collector.GetElementCount() + \
-                    ((self.space_collector.GetElementCount()*len(self._excel_parameters))))
+        self.counter = 0
+        self.startProgress.emit(self.space_collector.GetElementCount() + \
+                ((self.space_collector.GetElementCount()*len(self._excel_parameters))))
             
-            self._worker.RunWorkerAsync()
+        # Obtaining existing spaces
+        self.__get_exist_spaces()
+        # Write data to an excel file
+        self.__write_to_excel(self._excel_parameters)
             
-
     def __write_to_excel(self, params_to_write):
         """
         Writing parameters to an Excel workbook
