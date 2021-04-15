@@ -533,14 +533,24 @@ class Controller(object):
             control.Items.Add(par_name)
             control.EndUpdate()
 
-    def file_path_textBox_TextChanged(self, sender, args):
-        if sender.Text != "":
-            self._view._write_exl_button.Enabled = True
-            self._view._write_exl_checkBox.Enabled = True
-
     def space_id_comboBox_SelectedValueChanged(self, sender, args):
         if self._view._space_id_comboBox.SelectedIndex != 0:
+            self._view._run_button.Enabled = True
             self._model.search_id = self._view._space_id_comboBox.SelectedItem
+
+            if self._view._file_path_textBox.Text != "":
+                self._view._write_exl_button.Enabled = True
+                self._view._write_exl_checkBox.Enabled = True
+                
+        else:
+            self._view._run_button.Enabled = False
+            self._view._write_exl_button.Enabled = False
+            self._view._write_exl_checkBox.Enabled = False
+
+    def file_path_textBox_TextChanged(self, sender, args):
+        if sender.Text != "" and self._view._space_id_comboBox.SelectedIndex != 0:
+            self._view._write_exl_button.Enabled = True
+            self._view._write_exl_checkBox.Enabled = True
 
     def write_exl_checkBox_CheckChng(self, sender, args):
         if sender.CheckState == WinForms.CheckState.Checked:
@@ -549,7 +559,6 @@ class Controller(object):
             self._model.xl_write_flag = False
 
     def browse_button_Click(self, sender, args):
-
         self._open_file_Dialog.InitialDirectory = os.path.realpath(self.doc.PathName)
         self._open_file_Dialog.Filter = "CSV files (*.csv)|*.csv|Excel Files|*.xls;*.xlsx"
         self._open_file_Dialog.FilterIndex = 2
@@ -564,6 +573,11 @@ class Controller(object):
     def run_button_Click(self, sender, args):
         self.excel_parameters = sorted(list(self._view._shar_pars_checkedListBox.CheckedItems) + \
                                 list(self._view._builtin_pars_checkedListBox.CheckedItems))
+        if len(self.excel_parameters) == 0:
+            WinForms.MessageBox.Show("At least one parameter must be chosen!", "Task cancelled!", 
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+            return
+
         self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
         
         self._model.excel_parameters = self.excel_parameters
@@ -572,6 +586,11 @@ class Controller(object):
     def write_exl_button_Click(self, sender, args):
         self.excel_parameters = sorted(list(self._view._shar_pars_checkedListBox.CheckedItems) + \
                                 list(self._view._builtin_pars_checkedListBox.CheckedItems))
+        if len(self.excel_parameters) == 0:
+            WinForms.MessageBox.Show("At least one parameter must be chosen!", "Task cancelled!", 
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+            return
+
         self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
         
         self._model.excel_parameters = self.excel_parameters
@@ -926,7 +945,14 @@ class Model(object):
                         ref_id_par.Set(room.Id.IntegerValue)
                         self.New_MEPSpaces[room.Id.IntegerValue] = self.New_MEPSpaces.get(room.Id.IntegerValue, space)
                         self.para_setter(room, space)
-                
+                tr.Commit()
+
+        except Exception:
+            pass 
+
+        try:
+            with Transaction(self.doc, "Set space Id") as tr:
+                tr.Start()   
                 # Get "ID_revit" parameter of a MEP space
                 space_id = space.GetParameters("ID_revit")[0]
                 # Assign space ID to "ID_revit" parameter
@@ -935,7 +961,7 @@ class Model(object):
                 tr.Commit()
 
         except Exception:
-            pass
+            pass 
 
     def merge_two_dicts(self, d1, d2):
         '''

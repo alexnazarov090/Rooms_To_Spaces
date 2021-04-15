@@ -215,6 +215,7 @@ class MainForm(Form):
 		self._run_button.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right
 		self._run_button.AutoSize = True
 		self._run_button.BackColor = System.Drawing.SystemColors.Highlight
+		self._run_button.Enabled = False
 		self._run_button.FlatStyle = System.Windows.Forms.FlatStyle.Popup
 		self._run_button.Font = System.Drawing.Font("Microsoft Sans Serif", 12, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 204)
 		self._run_button.ForeColor = System.Drawing.SystemColors.HighlightText
