@@ -454,8 +454,12 @@ class Controller(object):
             # cancel the closure of the form.
             args.Cancel = True
         
-        else:
-            self._worker.CancelAsync()
+        elif result == WinForms.DialogResult.Yes:
+
+            # Close Excel Application in Model class
+            if self._model.excel is not None:
+                self._model.excel.Quit()
+                Marshal.FinalReleaseComObject(self._model.excel)
 
     def get_parameter_bindings(self):
         prj_defs_dict = {}
