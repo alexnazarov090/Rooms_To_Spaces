@@ -546,7 +546,7 @@ class Controller(object):
             self._view._run_button.Enabled = True
             self._model.search_id = self._view._space_id_comboBox.SelectedItem
 
-            if self._view._file_path_textBox.Text != "":
+            if self._view._file_path_textBox.Text != "" and self._model.space_collector.GetElementCount() > 0:
                 self._view._write_exl_button.Enabled = True
                 self._view._write_exl_checkBox.Enabled = True
                 
@@ -557,8 +557,9 @@ class Controller(object):
 
     def file_path_textBox_TextChanged(self, sender, args):
         if sender.Text != "" and self._view._space_id_comboBox.SelectedIndex != 0:
-            self._view._write_exl_button.Enabled = True
             self._view._write_exl_checkBox.Enabled = True
+            if self._model.space_collector.GetElementCount() > 0:
+                self._view._write_exl_button.Enabled = True
 
     def write_exl_checkBox_CheckChng(self, sender, args):
         if sender.CheckState == WinForms.CheckState.Checked:
@@ -609,6 +610,7 @@ class Controller(object):
     def del_spaces_button_Click(self, sender, args):
         self._model.delete_spaces()
         self._view._del_spaces_button.Enabled = False
+        self._view._write_exl_button.Enabled = False
 
     def startProgressBar(self, *args):
         self._view._progressBar.Value = 0
@@ -622,7 +624,11 @@ class Controller(object):
             self._view._progressBar.Value = self._view._progressBar.Maximum
             WinForms.MessageBox.Show("Task completed successfully!", "Success!", 
             WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+
             self._view._del_spaces_button.Enabled = True
+
+            if self._view._file_path_textBox.Text != "":
+                self._view._write_exl_button.Enabled = True
 
     def run_worker_completed(self, sender, args):
         
@@ -864,19 +870,24 @@ class Model(object):
         '''
         # Collect all existing MEP spaces in this document
         for space in self._space_collector:
+
             # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
             id_par_list = space.GetParameters(self._search_id)
             ref_id_par_val = id_par_list[0].AsString()
+
             # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
             # If it's not the case delete the corresponding space
             if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
                 with Transaction(self.doc, "Delete spaces") as tr:
                     tr.Start()
+                    
                     try:
                         self.doc.Delete(space.Id)
                     except Exception:
                         pass
+
                     tr.Commit()
+                    
             else:
                 # Otherwise cast it into Existing MEP spaces dictionary
                 self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
@@ -893,21 +904,20 @@ class Model(object):
         spaces = self._space_collector.ToElements()
         self.startProgress.emit(len(spaces))
 
-        with TransactionGroup(self.doc, "Delete spaces") as tg:
-            tg.Start()
+        with Transaction(self.doc, "Delete spaces") as tr:
+            tr.Start()
 
             for space in spaces:
-                with Transaction(self.doc, "Delete spaces") as tr:
-                        tr.Start()
-                        try:
-                            self.doc.Delete(space.Id)
 
-                            self.counter += 1
-                            self.ReportProgress.emit(self.counter)
-                        except Exception:
-                            pass
-                        tr.Commit()
-            tg.Assimilate()
+                try:
+                    self.doc.Delete(space.Id)
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
+
+                except Exception:
+                    pass
+
+            tr.Commit()
 
             # Reset space collector
             self._space_collector = FilteredElementCollector(
