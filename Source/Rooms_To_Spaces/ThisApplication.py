@@ -29,8 +29,14 @@ import string
 import re
 from itertools import izip, product
 import traceback
-import inspect
+import logging
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+logging.basicConfig(level=logging.DEBUG,
+                    filename=r'{}'.format(os.path.join(dir_path, 'App.log')),
+                    filemode='w',
+                    format='%(asctime)s %(name)s %(levelname)s:%(message)s')
+logger = logging.getLogger(__name__)
 
 
 class ThisApplication (ApplicationEntryPoint):
@@ -523,11 +529,14 @@ class Controller(object):
         catlist = List[ElementId](bicId)
         paramIds = ParameterFilterUtilities.GetFilterableParametersInCommon(self.doc, catlist)
         for bpar in BuiltInParameter.GetValues(clr.GetClrType(BuiltInParameter)):
+
             try:
                 bparId = ElementId(bpar)
                 if bparId in paramIds:
                     builtin_pars.add(LabelUtils.GetLabelFor(bpar))
-            except Exception:
+
+            except Exception as e:
+                logger.error(e, exc_info=True)
                 pass
 
         return builtin_pars
@@ -756,7 +765,8 @@ class Model(object):
             self.__main()
             self.endProgress.emit()
 
-        except Exception:
+        except Exception as e:
+            logger.error(e, exc_info=True)
             WinForms.MessageBox.Show("The operation was cancelled!", "Error!",
             WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
             return
@@ -777,12 +787,9 @@ class Model(object):
         #    return
 
         except Exception as e:
-            msg = traceback.format_exc(str(e))
-            WinForms.MessageBox.Show(msg, "Error!",
-            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
-            return
+            logger.error(e, exc_info=True)
+            pass
         
-
     def create_spaces_by_rooms(self, rooms):
         # Initiate the transacton group
         with TransactionGroup(self.doc, "Batch create spaces/Transfer parameters") as tg:
@@ -825,152 +832,6 @@ class Model(object):
 
             tg.Assimilate()
     
-    def space_updater(self, room, exst_space):
-        ''' 
-        Function updates existing spaces and moves them if necessary
-        '''
-        # And extract its coordinates
-        try:
-            exst_space_coords = exst_space.Location.Point
-            # Get room coordinates
-            room_coords = room.Location.Point
-            # Compare two sets of coordinates
-            # If they are almost the same
-            if exst_space_coords.IsAlmostEqualTo(room_coords):
-                with Transaction(self.doc, "Update parameters") as tr:
-                    tr.Start()
-                    options = tr.GetFailureHandlingOptions()
-                    failureHandler = ErrorSwallower()
-                    options.SetFailuresPreprocessor(failureHandler)
-                    options.SetClearAfterRollback(True)
-                    tr.SetFailureHandlingOptions(options)
-                    # Transfer room parameters to a corresponding space
-                    self.para_setter(room, exst_space)
-                    tr.Commit()
-            # Otherwise, move the existing space according to room coordinates
-            else:
-                move_vector = room.Location.Point - exst_space.Location.Point
-                with Transaction(self.doc, "Move spaces") as tr:
-                    tr.Start()
-                    options = tr.GetFailureHandlingOptions()
-                    failureHandler = ErrorSwallower()
-                    options.SetFailuresPreprocessor(failureHandler)
-                    options.SetClearAfterRollback(True)
-                    tr.SetFailureHandlingOptions(options)
-                    exst_space.Location.Move(move_vector)
-                    # Transfer room parameters to a corresponding space
-                    self.para_setter(room, exst_space)
-                    tr.Commit()
-        except System.MissingMemberException:
-            pass
-    
-    def space_check(self, Room_UniqueIds):
-        ''' 
-        Function checks for not placed spaces, obsolete spaces and deletes them
-        '''
-        # Collect all existing MEP spaces in this document
-        for space in self._space_collector:
-
-            # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
-            id_par_list = space.GetParameters(self._search_id)
-            ref_id_par_val = id_par_list[0].AsString()
-
-            # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
-            # If it's not the case delete the corresponding space
-            if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
-                with Transaction(self.doc, "Delete spaces") as tr:
-                    tr.Start()
-                    
-                    try:
-                        self.doc.Delete(space.Id)
-                    except Exception:
-                        pass
-
-                    tr.Commit()
-                    
-            else:
-                # Otherwise cast it into Existing MEP spaces dictionary
-                self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
-                    ref_id_par_val, space)
-            
-            self.counter += 1
-            self.ReportProgress.emit(self.counter)
-
-    def delete_spaces(self):
-        ''' 
-        Function deletes spaces
-        '''
-        self.counter = 0
-        spaces = self._space_collector.ToElements()
-        self.startProgress.emit(len(spaces))
-
-        with Transaction(self.doc, "Delete spaces") as tr:
-            tr.Start()
-
-            for space in spaces:
-
-                try:
-                    self.doc.Delete(space.Id)
-                    self.counter += 1
-                    self.ReportProgress.emit(self.counter)
-
-                except Exception:
-                    pass
-
-            tr.Commit()
-
-            # Reset space collector
-            self._space_collector = FilteredElementCollector(
-            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
-            self.New_MEPSpaces = {}
-            self.Exist_MEPSpaces = {}
-            self.endProgress.emit()
-
-            
-    
-    def para_setter(self, room, space):
-        ''' 
-        Function transers parameters from the room to newly created spaces
-        room: Revit Room, space: MEPSpace
-        '''
-        # For each parameter in room parameters define if it's shared or builtin parameter
-        for par in room.Parameters:
-            par_name = par.Definition.Name
-            if par.IsShared and par_name in self._excel_parameters:
-                # If room parameter is shared get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by room parameter GUID
-                # Depending on the room parameter storage type set its value to the space parameter
-                try:
-                    space_par = space.get_Parameter(par.GUID)
-                    if par.StorageType == StorageType.String and par.HasValue:
-                        space_par.Set(par.AsString())
-                    elif par.StorageType == StorageType.Integer and par.HasValue:
-                        space_par.Set(par.AsInteger())
-                    elif par.StorageType == StorageType.Double and par.HasValue:
-                        space_par.Set(par.AsDouble())
-                except Exception:
-                    pass
-
-                self.counter += 1
-                self.ReportProgress.emit(self.counter)
-
-            elif par.Definition.BuiltInParameter != BuiltInParameter.INVALID\
-                and LabelUtils.GetLabelFor(par.Definition.BuiltInParameter) in self._excel_parameters:
-                # If room parameter is builtin get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by builtin parameter
-                # Depending on the room parameter storage type set its value to the space parameter
-                try:
-                    space_par = space.get_Parameter(par.Definition)
-                    if par.StorageType == StorageType.String and par.HasValue:
-                        space_par.Set(par.AsString())
-                    elif par.StorageType == StorageType.Integer and par.HasValue:
-                        space_par.Set(par.AsInteger())
-                    elif par.StorageType == StorageType.Double and par.HasValue:
-                        space_par.Set(par.AsDouble())
-                except Exception:
-                    pass
-
-                self.counter += 1
-                self.ReportProgress.emit(self.counter)
-    
     def space_creator(self, room, lvls):
         ''' 
         Function creates new spaces 
@@ -1007,7 +868,8 @@ class Model(object):
                         self.para_setter(room, space)
                 tr.Commit()
 
-        except Exception:
+        except Exception as e:
+            logger.error(e, exc_info=True)
             pass 
 
         try:
@@ -1020,8 +882,161 @@ class Model(object):
                     space_id.Set(space.Id.IntegerValue)
                 tr.Commit()
 
-        except Exception:
-            pass 
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            pass
+
+    def space_updater(self, room, exst_space):
+        ''' 
+        Function updates existing spaces and moves them if necessary
+        '''
+        # And extract its coordinates
+        try:
+            exst_space_coords = exst_space.Location.Point
+            # Get room coordinates
+            room_coords = room.Location.Point
+            # Compare two sets of coordinates
+            # If they are almost the same
+            if exst_space_coords.IsAlmostEqualTo(room_coords):
+                with Transaction(self.doc, "Update parameters") as tr:
+                    tr.Start()
+                    options = tr.GetFailureHandlingOptions()
+                    failureHandler = ErrorSwallower()
+                    options.SetFailuresPreprocessor(failureHandler)
+                    options.SetClearAfterRollback(True)
+                    tr.SetFailureHandlingOptions(options)
+                    # Transfer room parameters to a corresponding space
+                    self.para_setter(room, exst_space)
+                    tr.Commit()
+            # Otherwise, move the existing space according to room coordinates
+            else:
+                move_vector = room.Location.Point - exst_space.Location.Point
+                with Transaction(self.doc, "Move spaces") as tr:
+                    tr.Start()
+                    options = tr.GetFailureHandlingOptions()
+                    failureHandler = ErrorSwallower()
+                    options.SetFailuresPreprocessor(failureHandler)
+                    options.SetClearAfterRollback(True)
+                    tr.SetFailureHandlingOptions(options)
+                    exst_space.Location.Move(move_vector)
+                    # Transfer room parameters to a corresponding space
+                    self.para_setter(room, exst_space)
+                    tr.Commit()
+        except System.MissingMemberException as e:
+            logger.error(e, exc_info=True)
+            pass
+    
+    def space_check(self, Room_UniqueIds):
+        ''' 
+        Function checks for not placed spaces, obsolete spaces and deletes them
+        '''
+        # Collect all existing MEP spaces in this document
+        for space in self._space_collector:
+
+            # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
+            id_par_list = space.GetParameters(self._search_id)
+            ref_id_par_val = id_par_list[0].AsString()
+
+            # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
+            # If it's not the case delete the corresponding space
+            if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
+                with Transaction(self.doc, "Delete spaces") as tr:
+                    tr.Start()
+                    
+                    try:
+                        self.doc.Delete(space.Id)
+                    except Exception as e:
+                        logger.error(e, exc_info=True)
+                        pass
+
+                    tr.Commit()
+
+            else:
+                # Otherwise cast it into Existing MEP spaces dictionary
+                self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
+                    ref_id_par_val, space)
+            
+            self.counter += 1
+            self.ReportProgress.emit(self.counter)
+
+    def para_setter(self, room, space):
+        ''' 
+        Function transers parameters from the room to newly created spaces
+        room: Revit Room, space: MEPSpace
+        '''
+        # For each parameter in room parameters define if it's shared or builtin parameter
+        for par in room.Parameters:
+            par_name = par.Definition.Name
+            if par.IsShared and par_name in self._excel_parameters:
+                # If room parameter is shared get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by room parameter GUID
+                # Depending on the room parameter storage type set its value to the space parameter
+                if not par.IsReadOnly:
+                    try:
+                        space_par = space.get_Parameter(par.GUID)
+                        if par.StorageType == StorageType.String and par.HasValue:
+                            space_par.Set(par.AsString())
+                        elif par.StorageType == StorageType.Integer and par.HasValue:
+                            space_par.Set(par.AsInteger())
+                        elif par.StorageType == StorageType.Double and par.HasValue:
+                            space_par.Set(par.AsDouble())
+                    except Exception as e:
+                        logger.error(e, exc_info=True)
+                        pass
+
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
+
+            elif par.Definition.BuiltInParameter != BuiltInParameter.INVALID\
+                and LabelUtils.GetLabelFor(par.Definition.BuiltInParameter) in self._excel_parameters:
+                # If room parameter is builtin get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by builtin parameter
+                # Depending on the room parameter storage type set its value to the space parameter
+                if not par.IsReadOnly:
+                    try:
+                        space_par = space.get_Parameter(par.Definition)
+                        if par.StorageType == StorageType.String and par.HasValue:
+                            space_par.Set(par.AsString())
+                        elif par.StorageType == StorageType.Integer and par.HasValue:
+                            space_par.Set(par.AsInteger())
+                        elif par.StorageType == StorageType.Double and par.HasValue:
+                            space_par.Set(par.AsDouble())
+
+                    except Exception as e:
+                        logger.error(e, exc_info=True)
+                        pass
+
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
+    
+    def delete_spaces(self):
+        ''' 
+        Function deletes spaces
+        '''
+        self.counter = 0
+        spaces = self._space_collector.ToElements()
+        self.startProgress.emit(len(spaces))
+
+        with Transaction(self.doc, "Delete spaces") as tr:
+            tr.Start()
+
+            for space in spaces:
+
+                try:
+                    self.doc.Delete(space.Id)
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
+
+                except Exception as e:
+                    logger.error(e, exc_info=True)
+                    pass
+
+            tr.Commit()
+
+            # Reset space collector
+            self._space_collector = FilteredElementCollector(
+            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
+            self.New_MEPSpaces = {}
+            self.Exist_MEPSpaces = {}
+            self.endProgress.emit()
 
     def merge_two_dicts(self, d1, d2):
         '''
@@ -1031,7 +1046,20 @@ class Model(object):
         d_merged = d1.copy()
         d_merged.update(d2)
         return d_merged
-    
+
+    def write_to_excel(self):
+        """
+        Writing parameters to an Excel workbook
+        """
+        self.counter = 0
+        self.startProgress.emit(self._space_collector.GetElementCount() + \
+                ((self._space_collector.GetElementCount()*len(self._excel_parameters))))
+            
+        # Obtaining existing spaces
+        self.__get_exist_spaces()
+        # Write data to an excel file
+        self.__write_to_excel(self._excel_parameters)
+
     def __get_exist_spaces(self):
         """
         Obtains existing spaces
@@ -1053,21 +1081,9 @@ class Model(object):
                 self.counter += 1
                 self.ReportProgress.emit(self.counter)
 
-            except Exception:
+            except Exception as e:
+                logger.error(e, exc_info=True)
                 pass
-        
-    def write_to_excel(self):
-        """
-        Writing parameters to an Excel workbook
-        """
-        self.counter = 0
-        self.startProgress.emit(self._space_collector.GetElementCount() + \
-                ((self._space_collector.GetElementCount()*len(self._excel_parameters))))
-            
-        # Obtaining existing spaces
-        self.__get_exist_spaces()
-        # Write data to an excel file
-        self.__write_to_excel(self._excel_parameters)
             
     def __write_to_excel(self, params_to_write):
         """
@@ -1090,7 +1106,8 @@ class Model(object):
             workBook = self.excel.Workbooks.Open(r'{}'.format(self._xl_file_path))
             workSheet = workBook.Worksheets(1)
         
-        except Exception:
+        except Exception as e:
+            logger.error(e, exc_info=True)
             pass
 
         for par, col in params.items():
@@ -1117,6 +1134,7 @@ class Model(object):
                 row += 1
                     
             except Exception as e:
+                logger.error(e, exc_info=True)
                 pass
 
         # makes the Excel application visible to the user
@@ -1159,7 +1177,8 @@ class ErrorSwallower(IFailuresPreprocessor):
                 
                 else:
                     return FailureProcessingResult.ProceedWithRollBack
-            except Exception:
+            except Exception as e:
+                logger.error(e, exc_info=True)
                 pass
         
         return FailureProcessingResult.Continue
@@ -1176,7 +1195,8 @@ class DuplicateSpaceWarningSwallower(IFailuresPreprocessor):
                 failureSeverity = fma.GetSeverity()
                 if failureSeverity == FailureSeverity.Warning and failure_id == BuiltInFailures.RoomFailures.RoomsInSameRegionSpaces:
                     failuresAccessor.DeleteWarning(fma)
-            except Exception:
+            except Exception as e:
+                logger.error(e, exc_info=True)
                 pass
 
         return FailureProcessingResult.Continue
