@@ -1,4 +1,7 @@
-﻿import clr
+﻿#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import clr
 import System
 clr.AddReference("RevitAPI.dll")
 clr.AddReference("RevitAPIUI.dll")
@@ -30,10 +33,12 @@ import re
 from itertools import izip, product
 import traceback
 import logging
+import json
+import io
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logging.basicConfig(level=logging.DEBUG,
-                    filename=r'{}'.format(os.path.join(dir_path, 'App.log')),
+                    filename=r'{}'.format(os.path.join(dir_path, 'ThisApplication.log')),
                     filemode='w',
                     format='%(asctime)s %(name)s %(levelname)s:%(message)s')
 logger = logging.getLogger(__name__)
@@ -447,9 +452,14 @@ class Controller(object):
         self.load_project_parameters((self._view._space_id_comboBox, self._view._shar_pars_checkedListBox)) 
         self.load_builtin_parameters(self._view._builtin_pars_checkedListBox)
 
+        self.load_settings((self._view._space_id_comboBox,
+                            self._view._file_path_textBox,
+                            self._view._shar_pars_checkedListBox,
+                            self._view._builtin_pars_checkedListBox))
+
         if self._model.space_collector.GetElementCount() > 0:
             self._view._del_spaces_button.Enabled = True
-    
+
     def On_MainForm_Closing(self, sender, args):
         message = "Are you sure that you would like to close the form?"
         caption = "Form Closing"
@@ -462,10 +472,48 @@ class Controller(object):
         
         elif result == WinForms.DialogResult.Yes:
 
+            self.save_settings()
+
             # Close Excel Application in Model class
             if self._model.excel is not None:
                 self._model.excel.Quit()
                 Marshal.FinalReleaseComObject(self._model.excel)
+
+    def save_settings(self):
+
+        try:
+            config = {self._view._space_id_comboBox.Name: self._view._space_id_comboBox.SelectedItem,
+                    self._view._file_path_textBox.Name: self._view._file_path_textBox.Text,
+                    self._view._shar_pars_checkedListBox.Name: list(self._view._shar_pars_checkedListBox.CheckedItems),
+                    self._view._builtin_pars_checkedListBox.Name: list(self._view._builtin_pars_checkedListBox.CheckedItems)}
+        
+            with io.open(r'{}'.format(os.path.join(dir_path, 'ConfigFile.json')),
+                        'w', encoding='utf8') as f:
+                json.dump(config, f, ensure_ascii=False)
+
+        except Exception as e:
+            logger.error(e, exc_info=True)
+
+    def load_settings(self, controls):
+
+        try:
+            with io.open(r'{}'.format(os.path.join(dir_path, 'ConfigFile.json')),
+                        'r', encoding='utf8') as f:
+                config = json.load(f)
+
+                for c in controls:
+                    if c.GetType() == clr.GetClrType(WinForms.ComboBox):
+                        c.SelectedItem = config[c.Name]
+                    elif c.GetType() == clr.GetClrType(WinForms.TextBox):
+                        c.Text = config[c.Name]
+                    elif c.GetType() == clr.GetClrType(WinForms.CheckedListBox):
+                        for item in config[c.Name]:
+                            index = c.FindStringExact(item)
+                            if (index != c.NoMatches):
+                                c.SetItemChecked(index, True)
+
+        except Exception as e:
+            logger.error(e, exc_info=True)
 
     def get_parameter_bindings(self):
         prj_defs_dict = {}
