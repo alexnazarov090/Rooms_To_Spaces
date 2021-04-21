@@ -36,6 +36,7 @@ import logging
 import json
 import io
 
+# Logger
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logging.basicConfig(level=logging.DEBUG,
                     filename=r'{}'.format(os.path.join(dir_path, 'ThisApplication.log')),
@@ -421,7 +422,10 @@ class Controller(object):
         self._view = view
         self._model = model
         self.excel_parameters = []
-        self._open_file_Dialog = WinForms.OpenFileDialog()
+        self.exl_file_dir_path = "C:\\"
+        self.config_file_dir_path = os.path.dirname(os.path.realpath(__file__))
+        self._open_xl_file_Dialog = WinForms.OpenFileDialog()
+        self._open_config_file_Dialog = WinForms.OpenFileDialog()
         self._worker = BackgroundWorker()
 
         self._connectSignals()
@@ -447,15 +451,15 @@ class Controller(object):
         self._view._builtin_pars_check_none_btn.Click += self.builtin_pars_check_none_btn_Click
         self._view._space_id_comboBox.SelectedValueChanged += self.space_id_comboBox_SelectedValueChanged
         self._view._write_exl_checkBox.CheckedChanged += self.write_exl_checkBox_CheckChng
+        self._view._load_stngs_button.Click += lambda _, __: self.load_settings((self._view._space_id_comboBox,
+                                                                    self._view._file_path_textBox,
+                                                                    self._view._shar_pars_checkedListBox,
+                                                                    self._view._builtin_pars_checkedListBox))
+        self._view._save_stngs_button.Click += lambda _, __: self.save_settings()
 
     def On_MainForm_StartUp(self, sender, args):
         self.load_project_parameters((self._view._space_id_comboBox, self._view._shar_pars_checkedListBox)) 
         self.load_builtin_parameters(self._view._builtin_pars_checkedListBox)
-
-        self.load_settings((self._view._space_id_comboBox,
-                            self._view._file_path_textBox,
-                            self._view._shar_pars_checkedListBox,
-                            self._view._builtin_pars_checkedListBox))
 
         if self._model.space_collector.GetElementCount() > 0:
             self._view._del_spaces_button.Enabled = True
@@ -472,8 +476,6 @@ class Controller(object):
         
         elif result == WinForms.DialogResult.Yes:
 
-            self.save_settings()
-
             # Close Excel Application in Model class
             if self._model.excel is not None:
                 self._model.excel.Quit()
@@ -482,24 +484,53 @@ class Controller(object):
     def save_settings(self):
 
         try:
+            filename = self._view._config_file_textBox.Text
+
+            if self._view._config_file_textBox.Text == "":
+
+                self._open_config_file_Dialog.InitialDirectory = self.config_file_dir_path
+                self._open_config_file_Dialog.Filter = "JSON files (*.json)|*.json"
+                self._open_config_file_Dialog.FilterIndex = 2
+                self._open_config_file_Dialog.RestoreDirectory = True
+
+                result = self._open_config_file_Dialog.ShowDialog(self._view)
+                if result == WinForms.DialogResult.OK:
+                    filename = self._open_config_file_Dialog.FileName
+                    self._view._config_file_textBox.Text = filename
+                else:
+                    return
+
             config = {self._view._space_id_comboBox.Name: self._view._space_id_comboBox.SelectedItem,
                     self._view._file_path_textBox.Name: self._view._file_path_textBox.Text,
                     self._view._shar_pars_checkedListBox.Name: list(self._view._shar_pars_checkedListBox.CheckedItems),
                     self._view._builtin_pars_checkedListBox.Name: list(self._view._builtin_pars_checkedListBox.CheckedItems)}
-        
-            with io.open(r'{}'.format(os.path.join(dir_path, 'ConfigFile.json')),
-                        'w', encoding='utf8') as f:
-                json.dump(config, f, ensure_ascii=False)
+
+            with io.open(filename,
+                        'w', encoding='utf8') as file:
+                json.dump(config, file, ensure_ascii=False)
 
         except Exception as e:
             logger.error(e, exc_info=True)
 
     def load_settings(self, controls):
 
+        self._open_config_file_Dialog.InitialDirectory = self.config_file_dir_path
+        self._open_config_file_Dialog.Filter = "JSON files (*.json)|*.json"
+        self._open_config_file_Dialog.FilterIndex = 2
+        self._open_config_file_Dialog.RestoreDirectory = True
+
+        result = self._open_config_file_Dialog.ShowDialog(self._view)
+        if result == WinForms.DialogResult.OK:
+            self._view._config_file_textBox.Clear()
+            filename = self._open_config_file_Dialog.FileName
+            self._view._config_file_textBox.Text = filename
+        else:
+            return
+
         try:
-            with io.open(r'{}'.format(os.path.join(dir_path, 'ConfigFile.json')),
-                        'r', encoding='utf8') as f:
-                config = json.load(f)
+            with io.open(filename,
+                        'r', encoding='utf8') as file:
+                config = json.load(file)
 
                 for c in controls:
                     if c.GetType() == clr.GetClrType(WinForms.ComboBox):
@@ -625,15 +656,15 @@ class Controller(object):
             self._model.xl_write_flag = False
 
     def browse_button_Click(self, sender, args):
-        self._open_file_Dialog.InitialDirectory = os.path.realpath(self.doc.PathName)
-        self._open_file_Dialog.Filter = "CSV files (*.csv)|*.csv|Excel Files|*.xls;*.xlsx"
-        self._open_file_Dialog.FilterIndex = 2
-        self._open_file_Dialog.RestoreDirectory = True
+        self._open_xl_file_Dialog.InitialDirectory = self.exl_file_dir_path
+        self._open_xl_file_Dialog.Filter = "CSV files (*.csv)|*.csv|Excel Files|*.xls;*.xlsx"
+        self._open_xl_file_Dialog.FilterIndex = 2
+        self._open_xl_file_Dialog.RestoreDirectory = True
         
-        result = self._open_file_Dialog.ShowDialog(self._view)
+        result = self._open_xl_file_Dialog.ShowDialog(self._view)
         if result == WinForms.DialogResult.OK:
             self._view._file_path_textBox.Clear()
-            fileName = self._open_file_Dialog.FileName
+            fileName = self._open_xl_file_Dialog.FileName
             self._model.xl_file_path, self._view._file_path_textBox.Text = fileName, fileName
 
     def run_button_Click(self, sender, args):
