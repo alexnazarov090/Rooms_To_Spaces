@@ -507,7 +507,7 @@ class Controller(object):
 
             with io.open(filename,
                         'w', encoding='utf8') as file:
-                json.dump(config, file, ensure_ascii=False)
+                json.dump(config, file, ensure_ascii=False, indent=4, sort_keys=True)
 
         except Exception as e:
             logger.error(e, exc_info=True)
@@ -664,8 +664,8 @@ class Controller(object):
         result = self._open_xl_file_Dialog.ShowDialog(self._view)
         if result == WinForms.DialogResult.OK:
             self._view._file_path_textBox.Clear()
-            fileName = self._open_xl_file_Dialog.FileName
-            self._model.xl_file_path, self._view._file_path_textBox.Text = fileName, fileName
+            filename = self._open_xl_file_Dialog.FileName
+            self._view._file_path_textBox.Text = filename
 
     def run_button_Click(self, sender, args):
         self.excel_parameters = sorted(list(self._view._shar_pars_checkedListBox.CheckedItems) + \
@@ -676,7 +676,8 @@ class Controller(object):
             return
 
         self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
-        
+
+        self._model.xl_file_path = self._view._file_path_textBox.Text
         self._model.excel_parameters = self.excel_parameters
         self._model.main()
 
@@ -689,7 +690,8 @@ class Controller(object):
             return
 
         self.excel_parameters.insert(0, self._view._space_id_comboBox.SelectedItem)
-        
+
+        self._model.xl_file_path = self._view._file_path_textBox.Text
         self._model.excel_parameters = self.excel_parameters
 
         if not self._worker.IsBusy:
