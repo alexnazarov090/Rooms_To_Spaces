@@ -763,13 +763,10 @@ class Model(object):
         self._xl_write_flag = xl_write_flag
         self.New_MEPSpaces = {}
         self.Exist_MEPSpaces = {}
-<<<<<<< HEAD
         
         # Create a space collector instance
         self._space_collector = FilteredElementCollector(
             self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
-=======
->>>>>>> a0fecebc5a8b2ce1cf177b9e12665291406a6168
 
         # endregion
 
@@ -778,13 +775,6 @@ class Model(object):
         self.ReportProgress = Event()
         self.endProgress = Event()
 
-<<<<<<< HEAD
-=======
-        # Create a space collector instance
-        self._space_collector = FilteredElementCollector(
-            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
-
->>>>>>> a0fecebc5a8b2ce1cf177b9e12665291406a6168
         # endregion
 
     # region Getters and Setters
