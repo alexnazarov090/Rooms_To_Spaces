@@ -763,17 +763,18 @@ class Model(object):
         self._xl_write_flag = xl_write_flag
         self.New_MEPSpaces = {}
         self.Exist_MEPSpaces = {}
-
+        
         # Create a space collector instance
-        space_collector = FilteredElementCollector(
+        self._space_collector = FilteredElementCollector(
             self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
-        self._spaces_count = space_collector.GetElementCount()
+
         # endregion
 
         # region Custom Events
         self.startProgress = Event()
         self.ReportProgress = Event()
         self.endProgress = Event()
+
         # endregion
 
     # region Getters and Setters
@@ -811,6 +812,7 @@ class Model(object):
 
     @property
     def spaces_count(self):
+        self._spaces_count = self._space_collector.GetElementCount()
         return self._spaces_count
     # endregion Getters and Setters
 
@@ -846,7 +848,7 @@ class Model(object):
                 ).OfCategory(BuiltInCategory.OST_Rooms)
 
             self.counter = 0
-            self.startProgress.emit(room_collector.GetElementCount() + self._spaces_count + \
+            self.startProgress.emit(room_collector.GetElementCount() + self.spaces_count + \
                 (2*(room_collector.GetElementCount()*len(self._excel_parameters))))
             self.__main()
             self.endProgress.emit()
@@ -1017,7 +1019,7 @@ class Model(object):
         Function checks for not placed spaces, obsolete spaces and deletes them
         '''
         # Collect all existing MEP spaces in this document
-        for space in self._space_collector:
+        for space in self._space_collector.ToElements():
 
             # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
             id_par_list = space.GetParameters(self._search_id)
