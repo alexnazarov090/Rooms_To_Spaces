@@ -461,7 +461,7 @@ class Controller(object):
         self.load_project_parameters((self._view._space_id_comboBox, self._view._shar_pars_checkedListBox)) 
         self.load_builtin_parameters(self._view._builtin_pars_checkedListBox)
 
-        if self._model.space_collector.GetElementCount() > 0:
+        if self._model.spaces_count > 0:
             self._view._del_spaces_button.Enabled = True
 
     def On_MainForm_Closing(self, sender, args):
@@ -634,7 +634,7 @@ class Controller(object):
             self._view._run_button.Enabled = True
             self._model.search_id = self._view._space_id_comboBox.SelectedItem
 
-            if self._view._file_path_textBox.Text != "" and self._model.space_collector.GetElementCount() > 0:
+            if self._view._file_path_textBox.Text != "" and self._model.spaces_count > 0:
                 self._view._write_exl_button.Enabled = True
                 self._view._write_exl_checkBox.Enabled = True
                 
@@ -646,7 +646,7 @@ class Controller(object):
     def file_path_textBox_TextChanged(self, sender, args):
         if sender.Text != "" and self._view._space_id_comboBox.SelectedIndex != 0:
             self._view._write_exl_checkBox.Enabled = True
-            if self._model.space_collector.GetElementCount() > 0:
+            if self._model.spaces_count > 0:
                 self._view._write_exl_button.Enabled = True
 
     def write_exl_checkBox_CheckChng(self, sender, args):
@@ -764,15 +764,17 @@ class Model(object):
         self.New_MEPSpaces = {}
         self.Exist_MEPSpaces = {}
 
-        # Create a space collector instance
-        self._space_collector = FilteredElementCollector(
-            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
         # endregion
 
         # region Custom Events
         self.startProgress = Event()
         self.ReportProgress = Event()
         self.endProgress = Event()
+
+        # Create a space collector instance
+        self._space_collector = FilteredElementCollector(
+            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
+
         # endregion
 
     # region Getters and Setters
@@ -809,8 +811,9 @@ class Model(object):
         self._excel_parameters = par_list
 
     @property
-    def space_collector(self):
-        return self._space_collector
+    def spaces_count(self):
+        self._spaces_count = self._space_collector.GetElementCount()
+        return self._spaces_count
     # endregion Getters and Setters
 
     def main(self):
@@ -841,7 +844,7 @@ class Model(object):
                 ).OfCategory(BuiltInCategory.OST_Rooms)
 
             self.counter = 0
-            self.startProgress.emit(room_collector.GetElementCount() + self._space_collector.GetElementCount() + \
+            self.startProgress.emit(room_collector.GetElementCount() + self.spaces_count + \
                 (2*(room_collector.GetElementCount()*len(self._excel_parameters))))
             self.__main()
             self.endProgress.emit()
@@ -923,7 +926,7 @@ class Model(object):
             point = room.Location.Point
             room_lvl = room.Level
             # Get a level from the lvls dictionary by room level elevation
-            lvl = lvls[room_lvl.Elevation]
+            lvl = lvls.get(room_lvl.Elevation)
             # Create space by coordinates and level taken from room
             with Transaction(self.doc, "Batch create spaces") as tr:
                 tr.Start()
@@ -1012,7 +1015,7 @@ class Model(object):
         Function checks for not placed spaces, obsolete spaces and deletes them
         '''
         # Collect all existing MEP spaces in this document
-        for space in self._space_collector:
+        for space in self._space_collector.ToElements():
 
             # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
             id_par_list = space.GetParameters(self._search_id)
@@ -1093,7 +1096,10 @@ class Model(object):
         Function deletes spaces
         '''
         self.counter = 0
-        spaces = self._space_collector.ToElements()
+
+        space_collector = FilteredElementCollector(
+            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
+        spaces = space_collector.ToElements()
         self.startProgress.emit(len(spaces))
 
         with Transaction(self.doc, "Delete spaces") as tr:
@@ -1111,10 +1117,7 @@ class Model(object):
                     pass
 
             tr.Commit()
-
-            # Reset space collector
-            self._space_collector = FilteredElementCollector(
-            self.doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
+            
             self.New_MEPSpaces = {}
             self.Exist_MEPSpaces = {}
             self.endProgress.emit()
