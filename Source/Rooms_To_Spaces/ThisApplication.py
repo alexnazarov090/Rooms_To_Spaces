@@ -77,336 +77,6 @@ class ThisApplication (ApplicationEntryPoint):
     def GetAddInId(self):
         return '2E9CE0D0-6090-4FF2-94A0-06E025DBC3CD'
 
-    def Rooms_To_Spaces(self):
-
-        # region Initial parameters
-        search_id = "REFERENCED_ROOM_UNIQUE_ID"
-        excel_parameters = [search_id, "ID_revit", "101_MW_AR_BUILDINGBLOCKS", "102_MW_AR_LEVEL", "103_MW_AR_REGION", "106_MW_AR_ENDNUMBER", "Number", "Name", "111_Name_ENG", "105_MW_AR_REGION_NAME_ENG",
-                           "110_MW_CRCLASS", "Area", "Unbounded Height", "112_MW_PS_PRCLASS", "117_MW_PS_CONTRPOINT", "113_MW_PS_TEMP_MAX_CLASS", "114_MW_PS_TEMP_MIN_CLASS", "115_MW_PS_HUMID_MAX_CLASS",
-                           "116_MW_PS_HUMID_MIN_CLASS", "ROOM_OVERFLOW", "108_MW_AR_FIRECAT", "127_MW_PS_SUBREION", "120_MW_FP_PEOPLE", "121_FP_PEOPLE_WORKMODE"]
-        New_MEPSpaces = {}
-        Exist_MEPSpaces = {}
-        # link_name = "C_CNP_AR_detached.rvt"
-        # endregion
-
-        # region Get Document and Application
-        doc = self.ActiveUIDocument.Document
-        uidoc = UIDocument(doc)
-        app = self.Application
-        uiapp = UIApplication(app)
-        docCreation = doc.Create
-        excel = Excel.ApplicationClass()
-        System.Threading.Thread.CurrentThread.CurrentCulture = System.Globalization.CultureInfo("en-US")
-        # endregion
-
-        def create_spaces_by_rooms(rooms):
-
-            # Initiate the transacton group
-            with TransactionGroup(doc, "Batch create spaces/Transfer parameters") as tg:
-                tg.Start()
-
-                Room_UniqueIds = [room.UniqueId for room in rooms if room.Area > 0 and room.Location != None]
-
-                # Define if there're spaces in a model
-                if _space_collector.GetElementCount() == 0:
-                    # If there are no spaces
-                    # Create a space
-                    for room in rooms:
-                        if room.Area > 0 and room.UniqueId not in New_MEPSpaces:
-                            space_creator(room, lvls_dict)
-
-                # If there are spaces in the model
-                else:
-                    space_check(Room_UniqueIds)
-                    # For each room in RVT link rooms take room UniqueId and check if there's space with the same Id among the existing MEP spaces
-                    for room in rooms:
-                        # If there's such space get it
-                        if room.UniqueId in Exist_MEPSpaces:
-                            exst_space = Exist_MEPSpaces[room.UniqueId]
-                            space_updater(room, exst_space)
-                            
-                        # If there's no such space
-                        else:
-                            # Create a space
-                            if room.Area > 0 and room.UniqueId not in New_MEPSpaces:
-                                space_creator(room, lvls_dict)
-
-                tg.Assimilate()
-
-        def space_updater(room, exst_space):
-            ''' 
-            Function updates existing spaces and moves them if necessary
-            '''
-            # And extract its coordinates
-            try:
-                exst_space_coords = exst_space.Location.Point
-                # Get room coordinates
-                room_coords = room.Location.Point
-                # Compare two sets of coordinates
-                # If they are almost the same
-                if exst_space_coords.IsAlmostEqualTo(room_coords):
-                    with Transaction(doc, "Update parameters") as tr:
-                        tr.Start()
-                        options = tr.GetFailureHandlingOptions()
-                        failureHandler = ErrorSwallower()
-                        options.SetFailuresPreprocessor(failureHandler)
-                        options.SetClearAfterRollback(True)
-                        tr.SetFailureHandlingOptions(options)
-                        # Transfer room parameters to a corresponding space
-                        para_setter(room, exst_space)
-                        tr.Commit()
-
-                # Otherwise, move the existing space according to room coordinates
-                else:
-                    move_vector = room.Location.Point - exst_space.Location.Point
-                    with Transaction(doc, "Move spaces") as tr:
-                        tr.Start()
-
-                        options = tr.GetFailureHandlingOptions()
-                        failureHandler = ErrorSwallower()
-                        options.SetFailuresPreprocessor(failureHandler)
-                        options.SetClearAfterRollback(True)
-                        tr.SetFailureHandlingOptions(options)
-
-                        exst_space.Location.Move(move_vector)
-                        # Transfer room parameters to a corresponding space
-                        para_setter(room, exst_space)
-                        tr.Commit()
-
-            except System.MissingMemberException:
-                pass
-                
-        def space_check(Room_UniqueIds):
-            ''' 
-            Function checks for not placed spaces, obsolete spaces and deletes them
-            '''
-            # Collect all existing MEP spaces in this document
-            for space in _space_collector.ToElements():
-                # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
-                ID_par_list = space.GetParameters(search_id)
-                ref_id_par_val = ID_par_list[0].AsString()
-                # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
-                # If it's not the case delete the corresponding space
-                if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
-                    with Transaction(doc, "Delete spaces") as tr:
-                        tr.Start()
-                        try:
-                            doc.Delete(space.Id)
-                        except:
-                            pass
-                        tr.Commit()
-                else:
-                    # Otherwise cast it into Existing MEP spaces dictionary
-                    Exist_MEPSpaces[ref_id_par_val] = Exist_MEPSpaces.get(
-                        ref_id_par_val, space)
-
-        def para_setter(r, space):
-            ''' 
-            Function transers parameters from the room to newly created spaces
-            r: room, space: MEPSpace
-            '''
-
-            # For each parameter in room parameters define if it's shared or builtin parameter
-            for par in r.Parameters:
-                if par.IsShared:
-                    # If room parameter is shared get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by room parameter GUID
-                    # Depending on the room parameter storage type set its value to the space parameter
-                    try:
-                        space_par = space.get_Parameter(par.GUID)
-                        if par.StorageType == StorageType.String and par.HasValue == True:
-                            space_par.Set(par.AsString())
-
-                        elif par.StorageType == StorageType.Integer and par.HasValue == True:
-                            space_par.Set(par.AsInteger())
-
-                        elif par.StorageType == StorageType.Double and par.HasValue == True:
-                            space_par.Set(par.AsDouble())
-                    except:
-                        pass
-
-                elif par.Definition.BuiltInParameter != BuiltInParameter.INVALID:
-                    # If room parameter is builtin get space from Spaces dictionary by UniqueId and extract corresponding space parameter from it by builtin parameter
-                    # Depending on the room parameter storage type set its value to the space parameter
-                    try:
-                        space_par = space.get_Parameter(par.Definition)
-                        if par.StorageType == StorageType.String and par.HasValue == True:
-                            space_par.Set(par.AsString())
-
-                        elif par.StorageType == StorageType.Integer and par.HasValue == True:
-                            space_par.Set(par.AsInteger())
-
-                        elif par.StorageType == StorageType.Double and par.HasValue == True:
-                            space_par.Set(par.AsDouble())
-                    except:
-                        pass
-
-        def space_creator(r, lvls):
-            ''' 
-            Function creates new spaces 
-            r: room, lvls: level elevations and levels dictionary
-            '''
-            try:
-                # Get the room level
-                point = r.Location.Point
-                room_lvl = r.Level
-                # Get a level from the lvls dictionary by room level elevation
-                lvl = lvls[room_lvl.Elevation]
-                # Create space by coordinates and level taken from room
-                with Transaction(doc, "Batch create spaces") as tr:
-                    tr.Start()
-                    
-                    options = tr.GetFailureHandlingOptions()
-                    failureHandler = ErrorSwallower()
-                    options.SetFailuresPreprocessor(failureHandler)
-                    options.SetClearAfterRollback(True)
-                    tr.SetFailureHandlingOptions(options)
-                    space = docCreation.NewSpace(lvl, UV(point.X, point.Y))
-                    
-                    # Get "REFERENCED_ROOM_UNIQUE_ID" parameter
-                    ID_par_list = space.GetParameters(search_id)
-                    ref_id_par = ID_par_list[0]
-
-                    # Assign room UniqueID to "REFERENCED_ROOM_UNIQUE_ID" parameter
-                    if ref_id_par:
-                        ref_id_par.Set(r.UniqueId)
-                        New_MEPSpaces[r.UniqueId] = New_MEPSpaces.get(r.UniqueId, space)
-                        para_setter(r, space)
-                    
-
-                    # Get "ID_revit" parameter of a MEP space
-                    space_id_par_list = space.GetParameters("ID_revit")
-                    space_id = space_id_par_list[0]
-
-                    # Assign space ID to "ID_revit" parameter
-                    if space_id:
-                        space_id.Set(space.Id.IntegerValue)
-
-                    tr.Commit()
-
-            except:
-                pass
-
-        def merge_two_dicts(d1, d2):
-            '''
-            Merges two dictionaries
-            Returns a merged dictionary
-            '''
-            d_merged = d1.copy()
-            d_merged.update(d2)
-            return d_merged
-
-        def write_to_excel(params_to_write):
-
-            """
-            Writing parameters to an Excel workbook
-            """
-            units = {UnitType.UT_Length: DisplayUnitType.DUT_METERS, 
-                    UnitType.UT_Area: DisplayUnitType.DUT_SQUARE_METERS, 
-                    UnitType.UT_HVAC_Airflow: DisplayUnitType.DUT_CUBIC_METERS_PER_HOUR}
-            params = dict(izip(params_to_write, string.ascii_uppercase))
-            rvt_filepath = doc.PathName
-            xl_path = re.sub('.rvt$', '_Ex.xlsx', rvt_filepath)
-            try:
-                workBook = excel.Workbooks.Open(r'{}'.format(xl_path))
-                workSheet = workBook.Worksheets(1)
-            
-            except:
-                workBook = excel.Workbooks.Add()
-                workSheet = workBook.Worksheets.Add()
-                excel.ActiveWorkbook.SaveAs(r'{}'.format(xl_path))
-
-            for par, col in params.items():
-                workSheet.Cells[1, col] = par
-            row = 2
-            MEPSpaces = merge_two_dicts(New_MEPSpaces, Exist_MEPSpaces)
-            for id, space in MEPSpaces.items():
-                try:
-                    workSheet.Cells[row, "A"] = id
-                    for par in space.Parameters:
-                        par_name = par.Definition.Name
-                        if par_name in params.keys():
-                            if par.StorageType == StorageType.String:
-                                workSheet.Cells[row, params[par_name]] = par.AsString()
-                            elif par.StorageType == StorageType.Integer:
-                                workSheet.Cells[row, params[par_name]] = par.AsInteger()
-                            else:
-                                conv_val = UnitUtils.ConvertFromInternalUnits(par.AsDouble(), units.get(par.Definition.UnitType, DisplayUnitType.DUT_GENERAL))
-                                workSheet.Cells[row, params[par_name]] = conv_val
-                    row += 1
-                    
-                except:
-                    pass
-
-            # makes the Excel application visible to the user
-            excel.Visible = True
-
-
-        # open_dialog = FileOpenDialog("Revit Files: (*.rvt) | *.rvt")
-        # open_dialog.Show()
-        # model_path = open_dialog.GetSelectedModelPath()
-        # linkedDoc = app.OpenDocumentFile(model_path, OpenOptions())
-        # room_collector = FilteredElementCollector(linkedDoc)
-
-        # Get AR RVT link and create a room collector instance
-        # for linkedDoc in uiapp.Application.Documents:
-        #	if linkedDoc.Title.Equals(link_name):
-        #		room_collector = FilteredElementCollector(linkedDoc)
-
-        # Create a Revit task dialog to communicate information to the user
-        mainDialog = TaskDialog("Create spaces from rooms")
-        mainDialog.MainInstruction = "Create spaces from rooms"
-        mainDialog.MainContent = "Please pick a linked model to create spaces!"
-        mainDialog.CommonButtons = TaskDialogCommonButtons.Ok
-        mainDialog.DefaultButton = TaskDialogResult.Ok
-
-        tResult = mainDialog.Show()
-
-        # Create a selection
-        sel = uidoc.Selection
-        # Prompt the user to pick the required external link
-        try:
-            ref = sel.PickObject(ObjectType.Element, "Please pick a linked model instance")
-
-            # Get AR RVT link
-            rvt_link = doc.GetElement(ref.ElementId)
-            linkedDoc = rvt_link.GetLinkDocument()
-
-            # Create a room collector instance
-            room_collector = FilteredElementCollector(linkedDoc)
-
-
-            # Collect levels from the current document
-            levels = FilteredElementCollector(doc).WhereElementIsNotElementType(
-            ).OfCategory(BuiltInCategory.OST_Levels).ToElements()
-            # For each level in the current model define its elevation and create level elevation:Level dictionary
-            lvls_dict = {level.Elevation: level for level in levels}
-
-            # Collect rooms from RVT link
-            if room_collector and room_collector.GetElementCount() != 0:
-                rooms_list = room_collector.WhereElementIsNotElementType(
-                ).OfCategory(BuiltInCategory.OST_Rooms).ToElements()
-
-            # Create a space collector instance
-            _space_collector = FilteredElementCollector(
-                doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_MEPSpaces)
-            
-            # Create spaces by rooms
-            create_spaces_by_rooms(rooms_list)
-
-        except:
-            TaskDialog.Show("Error", "The operation was cancelled!")
-        
-        # Create a Revit task dialog to communicate information to the user
-        mainDialog = TaskDialog("Write parameters to Excel")
-        mainDialog.MainInstruction = "Write parameters to Excel"
-        mainDialog.MainContent = "Do you want to write parameters to an Excell spreadsheet?"
-        mainDialog.CommonButtons = TaskDialogCommonButtons.Yes|TaskDialogCommonButtons.No
-
-        tResult = mainDialog.Show()
-        if tResult == TaskDialogResult.Yes:
-            # Write data to an excel file
-            write_to_excel(excel_parameters)
-
 
     def Rooms_To_Spaces_v2(self):
         view = MainForm()
@@ -826,6 +496,7 @@ class Model(object):
 
             # Get AR RVT link
             rvt_link = self.doc.GetElement(ref.ElementId)
+            self.transform = rvt_link.GetTotalTransform()
             linkedDoc = rvt_link.GetLinkDocument()
 
             # Create a room collector instance
@@ -927,7 +598,6 @@ class Model(object):
         '''
         try:
             # Get the room level
-            point = room.Location.Point
             room_lvl = room.Level
             # Get a level from the lvls dictionary by room level elevation
             lvl = lvls.get(room_lvl.Elevation)
@@ -940,7 +610,8 @@ class Model(object):
                 options.SetFailuresPreprocessor(failureHandler)
                 options.SetClearAfterRollback(True)
                 tr.SetFailureHandlingOptions(options)
-                space = self.doc.Create.NewSpace(lvl, UV(point.X, point.Y))
+                room_coords = self.transform.OfPoint(room.Location.Point)
+                space = self.doc.Create.NewSpace(lvl, UV(room_coords.X, room_coords.Y))
                 
                 # Get "REFERENCED_ROOM_UNIQUE_ID" parameter
                 ref_id_par = space.GetParameters(self._search_id)[0]
@@ -978,11 +649,12 @@ class Model(object):
         ''' 
         Function updates existing spaces and moves them if necessary
         '''
-        # And extract its coordinates
+        
         try:
+            # Extract space coordinates
             exst_space_coords = exst_space.Location.Point
             # Get room coordinates
-            room_coords = room.Location.Point
+            room_coords = self.transform.OfPoint(room.Location.Point)
             # Compare two sets of coordinates
             # If they are almost the same
             if exst_space_coords.IsAlmostEqualTo(room_coords):
@@ -998,7 +670,7 @@ class Model(object):
                     tr.Commit()
             # Otherwise, move the existing space according to room coordinates
             else:
-                move_vector = room.Location.Point - exst_space.Location.Point
+                move_vector = room_coords - exst_space_coords
                 with Transaction(self.doc, "Move spaces") as tr:
                     tr.Start()
                     options = tr.GetFailureHandlingOptions()
