@@ -9,15 +9,18 @@ clr.AddReference('System.Windows.Forms')
 clr.AddReference('System.Drawing')
 clr.AddReference("Microsoft.Office.Interop.Excel")
 
-from Autodesk.Revit import *
-from Autodesk.Revit.UI import *
-from Autodesk.Revit.UI.Macros import *
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.DB import Transaction
-from Autodesk.Revit.UI.Selection import *
-from System.Collections.Generic import *
+from Autodesk.Revit import Attributes
+from Autodesk.Revit.UI import UIDocument, UIApplication
+from Autodesk.Revit.UI.Macros import ApplicationEntryPoint
+from Autodesk.Revit.DB import Transaction, FilteredElementCollector, BuiltInCategory, TransactionGroup
+from Autodesk.Revit.DB import UV, StorageType, BuiltInParameter, LabelUtils, UnitType, DisplayUnitType
+from Autodesk.Revit.DB import UnitUtils, IFailuresPreprocessor, FailureSeverity, FailureResolutionType
+from Autodesk.Revit.DB import BuiltInFailures, FailureMessageAccessor, FailuresAccessor, FailureProcessingResult
+from Autodesk.Revit.DB import Category, ElementId, ParameterFilterUtilities, LabelUtils
+from Autodesk.Revit.UI.Selection import ObjectType
+
+from System.Collections.Generic import List
 from System.Runtime.InteropServices import Marshal
-from System.Threading import Thread
 from System.ComponentModel import BackgroundWorker
 import System.Windows.Forms as WinForms
 import System.Drawing
@@ -31,7 +34,7 @@ from MainForm import MainForm
 import string
 import re
 from itertools import izip, product
-import traceback
+
 import logging
 import json
 import io
