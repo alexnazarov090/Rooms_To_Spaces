@@ -99,6 +99,7 @@ class Controller(object):
         self.config_file_dir_path = os.path.dirname(os.path.realpath(__file__))
         self._open_xl_file_Dialog = WinForms.OpenFileDialog()
         self._open_config_file_Dialog = WinForms.OpenFileDialog()
+        self._save_config_file_Dialog = WinForms.SaveFileDialog()
         self._worker = BackgroundWorker()
 
         self._connectSignals()
@@ -161,14 +162,14 @@ class Controller(object):
 
             if self._view._config_file_textBox.Text == "":
 
-                self._open_config_file_Dialog.InitialDirectory = self.config_file_dir_path
-                self._open_config_file_Dialog.Filter = "JSON files (*.json)|*.json"
-                self._open_config_file_Dialog.FilterIndex = 2
-                self._open_config_file_Dialog.RestoreDirectory = True
+                self._save_config_file_Dialog.InitialDirectory = self.config_file_dir_path
+                self._save_config_file_Dialog.Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
+                self._save_config_file_Dialog.FilterIndex = 1
+                self._save_config_file_Dialog.RestoreDirectory = True
 
-                result = self._open_config_file_Dialog.ShowDialog(self._view)
+                result = self._save_config_file_Dialog.ShowDialog(self._view)
                 if result == WinForms.DialogResult.OK:
-                    filename = self._open_config_file_Dialog.FileName
+                    filename = self._save_config_file_Dialog.FileName
                     self._view._config_file_textBox.Text = filename
                 else:
                     return
@@ -220,16 +221,21 @@ class Controller(object):
             logger.error(e, exc_info=True)
 
     def get_parameter_bindings(self):
-        prj_defs_dict = {}
-        binding_map = self.doc.ParameterBindings
-        it = binding_map.ForwardIterator()
-        it.Reset()
-        while it.MoveNext():
-            current_binding = it.Current
-            if current_binding.Categories.Contains(Category.GetCategory(self.doc, BuiltInCategory.OST_MEPSpaces)):
-                prj_defs_dict[it.Key.Name] = it.Key
+        try:
+            prj_defs = set()
+            binding_map = self.doc.ParameterBindings
+            it = binding_map.ForwardIterator()
+            it.Reset()
+            while it.MoveNext():
+                current_binding = it.Current
+                if current_binding.Categories.Contains(Category.GetCategory(self.doc, BuiltInCategory.OST_MEPSpaces)):
+                    prj_defs.add(it.Key.Name)
 
-        return prj_defs_dict
+            return prj_defs
+        
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            pass
 
     def load_project_parameters(self, controls):
         internal_defs = self.get_parameter_bindings()
@@ -238,7 +244,7 @@ class Controller(object):
             control.BeginUpdate()
             for par_name in sorted(internal_defs):
                 if controls.index(control) == 0:
-                    match = re.match(r'\w*(ROOM)?\w*(ID)', par_name, re.IGNORECASE)
+                    match = re.match(r'(?<!.)(REFERENCED)?_?(ROOM)?_?(UNIQUE)?_?ID', par_name, re.IGNORECASE)
                     if match:
                         control.Items.Add(par_name)
                 else:
