@@ -81,7 +81,7 @@ class ThisApplication (ApplicationEntryPoint):
         return '2E9CE0D0-6090-4FF2-94A0-06E025DBC3CD'
 
 
-    def Rooms_To_Spaces_v2(self):
+    def Rooms_To_Spaces(self):
         view = MainForm()
         model = Model(self)     
         controller = Controller(self, view=view, model=model)
@@ -128,7 +128,8 @@ class Controller(object):
         self._view._load_stngs_button.Click += lambda _, __: self.load_settings((self._view._space_id_comboBox,
                                                                     self._view._file_path_textBox,
                                                                     self._view._shar_pars_checkedListBox,
-                                                                    self._view._builtin_pars_checkedListBox))
+                                                                    self._view._builtin_pars_checkedListBox,
+                                                                    self._view._write_exl_checkBox))
         self._view._save_stngs_button.Click += lambda _, __: self.save_settings()
 
     def On_MainForm_StartUp(self, sender, args):
@@ -177,7 +178,8 @@ class Controller(object):
             config = {self._view._space_id_comboBox.Name: self._view._space_id_comboBox.SelectedItem,
                     self._view._file_path_textBox.Name: self._view._file_path_textBox.Text,
                     self._view._shar_pars_checkedListBox.Name: list(self._view._shar_pars_checkedListBox.CheckedItems),
-                    self._view._builtin_pars_checkedListBox.Name: list(self._view._builtin_pars_checkedListBox.CheckedItems)}
+                    self._view._builtin_pars_checkedListBox.Name: list(self._view._builtin_pars_checkedListBox.CheckedItems),
+                    self._view._write_exl_checkBox.Name: self._view._write_exl_checkBox.Checked.ToString()}
 
             with io.open(filename,
                         'w', encoding='utf8') as file:
@@ -209,8 +211,16 @@ class Controller(object):
                 for c in controls:
                     if c.GetType() == clr.GetClrType(WinForms.ComboBox):
                         c.SelectedItem = config[c.Name]
+
                     elif c.GetType() == clr.GetClrType(WinForms.TextBox):
                         c.Text = config[c.Name]
+
+                    elif c.GetType() == clr.GetClrType(WinForms.CheckBox):
+                        if config[c.Name] == "True":
+                            c.Checked = True
+                        else:
+                            c.Checked = False
+
                     elif c.GetType() == clr.GetClrType(WinForms.CheckedListBox):
                         for item in config[c.Name]:
                             index = c.FindStringExact(item)
@@ -505,6 +515,12 @@ class Model(object):
 
             # Get AR RVT link
             rvt_link = self.doc.GetElement(ref.ElementId)
+            if not self.rvt_link_check(rvt_link):
+                WinForms.MessageBox.Show("The operation was cancelled!", "Error!",
+                WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+                return
+            
+
             self.transform = rvt_link.GetTotalTransform()
             linkedDoc = rvt_link.GetLinkDocument()
 
@@ -548,15 +564,30 @@ class Model(object):
             if self._xl_write_flag:
                 self.__write_to_excel(self._excel_parameters)
 
-        #except Exception as e:
-        #    msg = traceback.format_exc(str(e))
-        #    WinForms.MessageBox.Show(msg, "Error!",
-        #    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
-        #    return
-
         except Exception as e:
             logger.error(e, exc_info=True)
             pass
+
+    def rvt_link_check(self, rvt_link_instance):
+        rvt_link_type = self.doc.GetElement(rvt_link_instance.GetTypeId())
+        try:
+            room_bound = rvt_link_type.get_Parameter(BuiltInParameter.WALL_ATTR_ROOM_BOUNDING)
+            if not room_bound.AsInteger():
+                result = WinForms.MessageBox.Show("Room Bounding is turned off! Would you like to turn it on?", "Warning!",
+                WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Question)
+
+                if result == WinForms.DialogResult.Yes:
+                    with Transaction(self.doc, "Set Room Bounding") as tr:
+                        tr.Start()
+                        room_bound.Set(1)
+                        tr.Commit()
+                    return True
+                return False
+            return True
+
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            return False
         
     def create_spaces_by_rooms(self, rooms):
         # Initiate the transacton group
@@ -969,3 +1000,4 @@ class DuplicateSpaceWarningSwallower(IFailuresPreprocessor):
                 pass
 
         return FailureProcessingResult.Continue
+
