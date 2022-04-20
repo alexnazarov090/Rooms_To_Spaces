@@ -806,6 +806,27 @@ class Model(object):
 
                     self.counter += 1
                     self.ReportProgress.emit(self.counter)
+            
+            else:
+                if not par.IsReadOnly and par_name in self._excel_parameters:
+                    try:
+                        space_pars = space.GetParameters(par_name)
+                        if space_pars:
+                            space_par = space_pars[0]
+                            
+                            if par.StorageType == StorageType.String and par.HasValue:
+                                space_par.Set(par.AsString())
+                            elif par.StorageType == StorageType.Integer and par.HasValue:
+                                space_par.Set(par.AsInteger())
+                            elif par.StorageType == StorageType.Double and par.HasValue:
+                                space_par.Set(par.AsDouble())
+
+                    except Exception as e:
+                        logger.error(e, exc_info=True)
+                        pass
+
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
     
     def delete_spaces(self):
         ''' 
