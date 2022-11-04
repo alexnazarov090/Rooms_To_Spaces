@@ -515,7 +515,8 @@ class Model(object):
 
             # Get AR RVT link
             rvt_link = self.doc.GetElement(ref.ElementId)
-            if not self.rvt_link_check(rvt_link):
+            self.rvt_link_type_id = rvt_link.GetTypeId()
+            if not self.rvt_link_check(self.rvt_link_type_id):
                 WinForms.MessageBox.Show("The operation was cancelled!", "Error!",
                 WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
                 return
@@ -536,7 +537,7 @@ class Model(object):
             ).OfCategory(BuiltInCategory.OST_Levels)
 
             # For each level in the current model define its elevation and create level elevation:Level dictionary
-            self.lvls_dict = {level.Elevation: level for level in levels}
+            self.lvls_dict = {round(level.Elevation): level for level in levels}
             
             # Collect rooms from RVT link
             if room_collector and room_collector.GetElementCount() != 0:
@@ -568,8 +569,8 @@ class Model(object):
             logger.error(e, exc_info=True)
             pass
 
-    def rvt_link_check(self, rvt_link_instance):
-        rvt_link_type = self.doc.GetElement(rvt_link_instance.GetTypeId())
+    def rvt_link_check(self, rvt_link_type_id):
+        rvt_link_type = self.doc.GetElement(rvt_link_type_id)
         try:
             room_bound = rvt_link_type.get_Parameter(BuiltInParameter.WALL_ATTR_ROOM_BOUNDING)
             if not room_bound.AsInteger():
@@ -616,18 +617,15 @@ class Model(object):
                     if room.UniqueId in self.Exist_MEPSpaces:
                         exst_space = self.Exist_MEPSpaces[room.UniqueId]
                         self.space_updater(room, exst_space)
-                        
-                        self.counter += 1
-                        self.ReportProgress.emit(self.counter)
-                        
+
                     # If there's no such space
                     else:
                         # Create a space
                         if room.Area > 0 and room.UniqueId not in self.New_MEPSpaces:
                             self.space_creator(room, self.lvls_dict)
 
-                        self.counter += 1
-                        self.ReportProgress.emit(self.counter)
+                    self.counter += 1
+                    self.ReportProgress.emit(self.counter)
 
             tg.Assimilate()
     
@@ -637,10 +635,10 @@ class Model(object):
         room: Revit Room, lvls: level elevations and levels dictionary
         '''
         try:
-            # Get the room level
-            room_lvl = room.Level
+            # Get the room level elevation
+            room_lvl_elev = room.Level.Elevation
             # Get a level from the lvls dictionary by room level elevation
-            lvl = lvls.get(room_lvl.Elevation)
+            lvl = lvls.get(round(room_lvl_elev))
             # Create space by coordinates and level taken from room
             with Transaction(self.doc, "Batch create spaces") as tr:
                 tr.Start()
@@ -672,14 +670,28 @@ class Model(object):
             pass 
 
         try:
-            with Transaction(self.doc, "Set space Id") as tr:
+            with Transaction(self.doc, "Set referenced link Id") as tr:
                 tr.Start()   
-                # Get "ID_revit" parameter of a MEP space
-                space_id = space.GetParameters("ID_revit")[0]
-                # Assign space ID to "ID_revit" parameter
-                if space_id:
-                    space_id.Set(space.Id.IntegerValue)
+                # Get link ID parameter from the MEP space
+                ref_link_id_par_list = space.GetParameters("REFERENCED_LINK_ID")
+                if ref_link_id_par_list is not None and len(ref_link_id_par_list) > 0:
+                    ref_link_id_par = ref_link_id_par_list[0]
+                else:
+                    ref_link_id_par = ""
+                # Assign referenced link Id to "ref_link_id" parameter
+                if ref_link_id_par:
+                    ref_link_id_par.Set(self.rvt_link_type_id.ToString())
                 tr.Commit()
+
+        # try:
+        #     with Transaction(self.doc, "Set space Id") as tr:
+        #         tr.Start()   
+        #         # Get "ID_revit" parameter of a MEP space
+        #         space_id = space.GetParameters("ID_revit")[0]
+        #         # Assign space ID to "ID_revit" parameter
+        #         if space_id:
+        #             space_id.Set(space.Id.IntegerValue)
+        #         tr.Commit()
 
         except Exception as e:
             logger.error(e, exc_info=True)
@@ -733,13 +745,19 @@ class Model(object):
         # Collect all existing MEP spaces in this document
         for space in self._space_collector.ToElements():
 
-            # Get "REFERENCED_ROOM_UNIQUE_ID" parameter of each space
-            id_par_list = space.GetParameters(self._search_id)
-            ref_id_par_val = id_par_list[0].AsString()
+            # Get "REFERENCED_ROOM_UNIQUE_ID" and "REFERENCED_LINK_ID" parameters of each space
+            ref_id_par = space.GetParameters(self._search_id)[0].AsString()
+
+            ref_link_id_par_list = space.GetParameters("REFERENCED_LINK_ID")
+            if ref_link_id_par_list is not None and len(ref_link_id_par_list) > 0:
+                ref_link_id = ref_link_id_par_list[0].AsString()
+            else:
+                ref_link_id = self.rvt_link_type_id.ToString()
 
             # Check if REFERENCED_ROOM_UNIQUE_ID is in room Room_UniqueIds
             # If it's not the case delete the corresponding space
-            if space.Area == 0 or ref_id_par_val not in Room_UniqueIds:
+            if space.Area == 0 or (ref_id_par not in Room_UniqueIds and 
+            ref_link_id == self.rvt_link_type_id.ToString()):
                 with Transaction(self.doc, "Delete spaces") as tr:
                     tr.Start()
                     
@@ -753,8 +771,8 @@ class Model(object):
 
             else:
                 # Otherwise cast it into Existing MEP spaces dictionary
-                self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
-                    ref_id_par_val, space)
+                self.Exist_MEPSpaces[ref_id_par] = self.Exist_MEPSpaces.get(
+                    ref_id_par, space)
             
             self.counter += 1
             self.ReportProgress.emit(self.counter)
@@ -846,12 +864,13 @@ class Model(object):
 
                 try:
                     self.doc.Delete(space.Id)
-                    self.counter += 1
-                    self.ReportProgress.emit(self.counter)
-
+                    
                 except Exception as e:
                     logger.error(e, exc_info=True)
                     pass
+
+                self.counter += 1
+                self.ReportProgress.emit(self.counter)
 
             tr.Commit()
             
@@ -873,7 +892,7 @@ class Model(object):
         Writing parameters to an Excel workbook
         """
         self.counter = 0
-        self.startProgress.emit(self._space_collector.GetElementCount() + \
+        self.startProgress.emit(2*self._space_collector.GetElementCount() + \
                 ((self._space_collector.GetElementCount()*len(self._excel_parameters))))
             
         # Obtaining existing spaces
@@ -899,13 +918,13 @@ class Model(object):
                 self.Exist_MEPSpaces[ref_id_par_val] = self.Exist_MEPSpaces.get(
                         ref_id_par_val, space)
 
-                self.counter += 1
-                self.ReportProgress.emit(self.counter)
-
             except Exception as e:
                 logger.error(e, exc_info=True)
                 pass
-            
+
+            self.counter += 1
+            self.ReportProgress.emit(self.counter)
+
     def __write_to_excel(self, params_to_write):
         """
         Writing parameters to an Excel workbook
@@ -957,6 +976,9 @@ class Model(object):
             except Exception as e:
                 logger.error(e, exc_info=True)
                 pass
+        
+        self.counter += 1
+        self.ReportProgress.emit(self.counter)
 
         # makes the Excel application visible to the user
         self.excel.Visible = True
